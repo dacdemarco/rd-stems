@@ -1,0 +1,11 @@
+# entorno y descargas: los arma install.bat
+.venv/
+tools/
+python/
+models/
+build/
+dist/
+*.spec
+RD Stems.exe
+__pycache__/
+error.log

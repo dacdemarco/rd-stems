@@ -1,0 +1,31 @@
+# Dependencias de audio-separator 0.47 SIN diffq (solo lo usa Demucs, que esta app no usa
+# y no existe para Python 3.14). Sin onnx/onnx2torch: solo los usan modelos MDX que esta app no usa y arrastran torchvision, que cambia torch por uno sin GPU.
+audioop-lts>=0.2.1; python_version >= "3.13"
+beartype>=0.22  # la 0.18 que pide audio-separator no entiende los tipos de Python 3.14
+einops>=0.7
+julius>=0.2
+ml_collections
+numpy>=2
+onnxruntime>=1.17
+packaging
+pydub>=0.25
+pyyaml
+requests>=2
+resampy>=0.4
+rotary-embedding-torch>=0.6.1,<0.7
+scipy>=1.13,<2
+six>=1.16
+soundfile>=0.12
+tqdm
+# análisis, interfaz y reproductor
+PySide6==6.11.2
+audioread
+librosa>=0.10
+sounddevice
+imageio-ffmpeg
+pillow
+# audio a MIDI: basic-pitch se instala aparte con --no-deps (pide TensorFlow, que no existe para 3.14;
+# usa su modelo ONNX con el onnxruntime de arriba)
+pretty_midi
+soxr  # beat-this (pulso y compás)
+mir_eval
