@@ -16,14 +16,6 @@ import traceback
 if sys.stderr is None:  # pythonw / .exe sin consola; tqdm necesita dónde escribir
     sys.stderr = sys.stdout = open(os.devnull, 'w')
 
-if os.name == 'nt':  # ffmpeg (audio-separator, pydub) es de consola: sin esto cada llamada abre una ventana negra
-    _popen_init = subprocess.Popen.__init__
-
-    def _no_window(self, *a, **k):
-        k['creationflags'] = k.get('creationflags', 0) | 0x08000000  # CREATE_NO_WINDOW
-        _popen_init(self, *a, **k)
-    subprocess.Popen.__init__ = _no_window
-
 import numpy as np
 import soundfile as sf
 from PySide6.QtCore import (QEasingCurve, QElapsedTimer, QFile, QMimeData, QObject, QPoint, QPointF, QPropertyAnimation,
@@ -229,6 +221,11 @@ def fmt_time(s):
 
 def settings():
     return QSettings('Ruido Diario', 'RD Stems')
+
+
+def start_dir(path):
+    """Carpeta donde abren los diálogos: la del último audio, o el Escritorio si todavía no hay ninguno."""
+    return os.path.dirname(path) or QStandardPaths.writableLocation(QStandardPaths.DesktopLocation)
 
 
 def apply_theme(name):
@@ -1374,13 +1371,13 @@ class Main(QMainWindow):
     # --- archivos ---
     def open_dialog(self):
         exts = ' '.join('*' + e for e in EXTENSIONS)
-        paths, _ = QFileDialog.getOpenFileNames(self, TXT['open'], os.path.dirname(self.src), f'Audio ({exts})')
+        paths, _ = QFileDialog.getOpenFileNames(self, TXT['open'], start_dir(self.src), f'Audio ({exts})')
         if paths:
             self.set_sources(paths)
 
     def folder_dialog(self):
         """Todas las canciones de una carpeta (sin subcarpetas), después de confirmar cuántas son."""
-        folder = QFileDialog.getExistingDirectory(self, TXT['batch'], os.path.dirname(self.src))
+        folder = QFileDialog.getExistingDirectory(self, TXT['batch'], start_dir(self.src))
         if not folder:
             return
         n = sum(f.lower().endswith(EXTENSIONS) for f in os.listdir(folder))
@@ -1557,7 +1554,7 @@ class Main(QMainWindow):
         s.setValue('export_fmt', dlg.fmt.value())
         s.setValue('export_auto', 'true' if auto else 'false')
         if not (auto and os.path.isdir(folder)):  # SIEMPRE EN: no pregunta (la 1a vez sí, para saber dónde)
-            folder = QFileDialog.getExistingDirectory(self, TXT['save_to'], folder or os.path.expanduser('~'))
+            folder = QFileDialog.getExistingDirectory(self, TXT['save_to'], folder or start_dir(''))
             if not folder:
                 return
         s.setValue('export_dir', folder)
@@ -2507,13 +2504,13 @@ class MidiPage(QWidget):
     def open_dialog(self):
         exts = ' '.join('*' + e for e in EXTENSIONS)
         last = self.opened[-1]['path'] if self.opened else self.main.src
-        paths, _ = QFileDialog.getOpenFileNames(self, TXT['open'], os.path.dirname(last), f'Audio ({exts})')
+        paths, _ = QFileDialog.getOpenFileNames(self, TXT['open'], start_dir(last), f'Audio ({exts})')
         self.add(paths)
 
     def folder_dialog(self):
         """Todos los audios de una carpeta (sin subcarpetas), después de confirmar cuántos son."""
         last = self.opened[-1]['path'] if self.opened else self.main.src
-        folder = QFileDialog.getExistingDirectory(self, TXT['batch'], os.path.dirname(last))
+        folder = QFileDialog.getExistingDirectory(self, TXT['batch'], start_dir(last))
         if not folder:
             return
         n = sum(f.lower().endswith(EXTENSIONS) for f in os.listdir(folder))
@@ -2762,7 +2759,7 @@ class MidiPage(QWidget):
         if not mids:
             return
         s = settings()
-        last = s.value('export_dir', os.path.expanduser('~'))
+        last = s.value('export_dir', start_dir(''))
         name = lambda it: os.path.splitext(os.path.basename(self.mid_of(it)))[0] + '-midi.mid'
         if len(mids) == 1:  # uno: se elige carpeta y nombre
             target, _ = QFileDialog.getSaveFileName(self, TXT['save_to'], os.path.join(last, name(mids[0][1])),

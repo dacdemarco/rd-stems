@@ -4,12 +4,21 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
 
 import numpy as np
 import soundfile as sf
+
+if os.name == "nt":  # ffmpeg y compañía son de consola: sin esto cada llamada abre una ventana negra (también en el proceso de separación)
+    _popen_init = subprocess.Popen.__init__
+
+    def _no_window(self, *a, **k):
+        k["creationflags"] = k.get("creationflags", 0) | 0x08000000  # CREATE_NO_WINDOW
+        _popen_init(self, *a, **k)
+    subprocess.Popen.__init__ = _no_window
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_DIR = os.path.join(APP_DIR, "models")
@@ -191,10 +200,17 @@ def youtube_audio(url, folder, log=print):
         if d["status"] == "downloading" and pct >= last[0] + 10:
             last[0] = pct
             log(f"Bajando de YouTube {pct}%")
-    with _yt(format="bestaudio/best", outtmpl=os.path.join(folder, "%(title)s.%(ext)s"), progress_hooks=[hook],
-             postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "flac"}]) as y:
-        info = y.extract_info(url)
-        return os.path.splitext(y.prepare_filename(info))[0] + ".flac"
+    for attempt in range(3):  # YouTube a veces da 403 a un link que acaba de entregar; cada intento pide uno nuevo
+        try:
+            with _yt(format="bestaudio/best", outtmpl=os.path.join(folder, "%(title)s.%(ext)s"), progress_hooks=[hook],
+                     postprocessors=[{"key": "FFmpegExtractAudio", "preferredcodec": "flac"}]) as y:
+                info = y.extract_info(url)
+                return os.path.splitext(y.prepare_filename(info))[0] + ".flac"
+        except Exception as e:
+            if "403" not in str(e) or attempt == 2:
+                raise
+            log("YouTube rechazó la descarga: se intenta de nuevo")
+            last[0] = -10
 
 
 def _drop_if_truncated(path, log):
@@ -222,7 +238,8 @@ def _fetch(url, path, log):
         r = urllib.request.urlopen(urllib.request.Request(url, headers={"Range": f"bytes={have}-"}), timeout=60)
     except urllib.error.HTTPError as e:
         if e.code != 416:  # 416: el .part ya estaba completo
-            raise
+            # audio-separator prueba su segundo repo solo si recibe RuntimeError (ej. BS-Roformer-SW da 404 en el primero)
+            raise RuntimeError(f"HTTP {e.code}: {url}") from e
     else:
         with r, open(part, "ab" if r.status == 206 else "wb") as f:
             have = have if r.status == 206 else 0  # el servidor no reanuda: desde cero
@@ -622,6 +639,7 @@ def analyze_all(audio, results, out_dir, log, step):
 
 
 def process(audio, out_dir, stems, extras, quality, analyze, hw, log=print, step=print):
+    hw = hw or hardware()  # la app manda None si se separa antes de que termine de detectar la GPU al abrir
     results = separate_all(audio, out_dir, stems, extras, quality, hw, log, step)
     report = analyze_all(audio, results, out_dir, log, step) if analyze else None
     return results, report
@@ -669,7 +687,11 @@ def detect_beats(y, sr, log=print):
     from beat_this.inference import Audio2Beats
     ckpt = os.path.join(MODEL_DIR, "beat_this-final0.ckpt")
     if not os.path.exists(ckpt):
-        _fetch(BEAT_URL, ckpt, log)
+        try:
+            _fetch(BEAT_URL, ckpt, log)
+        except (OSError, RuntimeError) as e:  # el servidor de JKU a veces da 500: el tempo sale de librosa
+            log(f"No se pudo bajar el modelo de pulso ({e}): tempo aproximado")
+            return None
     if len(y) < sr:
         return None
     beats, downs = Audio2Beats(ckpt, device="cuda" if torch.cuda.is_available() else "cpu", dbn=False)(y, sr)
